@@ -1,0 +1,678 @@
+******************
+1 моудль 1 задание 
+******************
+Удаление файла rm -rf 
+Таблица 
+Имя устройства             IPv4                     IPv6                        NIC
+CLI                    3.3.3.2/30               2001:3::2/64                  ISP-CLI
+ISP                    1.1.1.1/30               2001:1::1/64                  ISP-HQ
+                       2.2.2.1/30               2001:2::1/64                  ISP-BR
+                       3.3.3.1/30               2001:3::1/64                  ISP-CLI
+HQ-R                   1.1.1.3/30               2001:1::2/64                  ISP-HQ
+                       192.168.100.1/26         2000:192::1/122               HQ
+                       10.10.10.1/30            2001:10::1/64                 TUNNEL
+HQ-SRV                 192.168.100.2/26(DHCP)   2000:192;:2/122(DHCP)         HQ
+BR-R                   2.2.2.2/30               2001:2::2/64                  ISP-BR
+                       172.16.100.1/28          2000:172::1/124               BR
+                       10.10.10.2/30            2001:10::2/64                 TUNNEL
+BR-SRV                 172.16.100.2/28          2000:172::2/124               BR
+HQ-CLI                  (DHCP)                   (DHCP)                       HQ
+HQ-AD                  192.168.100.10/26        2000:192::10/122              HQ
+В данном случае используются такие условия 
+для BR Пул адресов для сети не более 16 маска 28 
+для HQ Пул адресов для сети не более 64 маска 26
+если нужнен пул под 128 адресов используйте маску 25
+а под 32 адреса маску 27 
+
+А)Присвоение имен в соотвествии с топологией 
+
+HQ-R и так же для BR-R
+входим в устройство
+login
+password
+входим в конфигурацию
+configure
+назначаем имя 
+hostname HQ-R(BR-R)
+exit - выйти
+comm - для сохранения настроек 
+confirm - для подтверждения 
+
+HQ-SRV и так же для BR-SRV
+login
+password
+su
+hostnamectl set-hostname HQ-SRV(BR-SRV); exec bash
+
+HQ-CLI и так же на CLI 
+password 
+
+зайти в терминал 
+su
+password
+hostnamectl set-hostname HQ-CLI(CLI); exec bash
+
+ISP
+на нем менять не надо доступа к нему нет это бля как ? 
+
+Б) IP адресация 
+
+CLI 
+
+В слущае если машина за глюкала выйдите из нее и через главную панель перезагрузите ее нажам на нее ПКМ -> Guest OS -> shutdown и затем включаем заново  
+
+ПКМ на параметры соединений ->  Пров. соед.1 -> параметры IPv4 -> Вручную задаем ip адрес 3.3.3.2/30 шлюх 3.3.3.1 
+
+DNS 8.8.8.8
+
+проверка айпи через терминал - ip a
+
+HQ-R 
+от ISP 
+configure
+interface gigabitethernet 1/0/1
+ip address 1.1.1.2/30 
+ip firewall disable 
+ex
+ex
+comm
+confirm
+ping 1.1.1.1
+
+настройка сети для  HQ-SRV 
+
+configure
+interface gigabitethernet 1/0/2
+ip address 192.168.100.2/26
+ip firewall disable
+ex
+ex
+comm
+confirm
+
+HQ-SRV получает айпи под DHCP
+
+BR-R 
+в сторону ISP
+configure
+interface gigabitethernet 1/0/1
+ip address 2.2.2.2/30
+ip firewall disable
+ex
+в сторону BR-SRV
+interface gigabitethenet 1/0/2
+ip address 172.16.100.1/28
+ip firewall disable
+ex
+ex
+comm
+confirm
+ping 2.2.2.1
+!!!! - пинг удачный 
+
+BR-SRV
+Добавление айпи адреса
+echo 172.16.100.2/28 > /etc/net/ifaces/ens192/ipv4address 
+Маршрут по умолчанию 
+echo via default 172.16.100.1 > /etc/net/ifaces/ens192/ipv4route
+прописка DNS server
+echo nameserver 192.168.100.2 > /etc/net/ifaces/ens192/resolv.conf
+проверка настроек 
+vim /etc/net/ifaces/ens192/options
+Войти в режим редактирования "I"
+перед этим выйдите из режима редактирования на Ecs
+сохранить ":w"
+для выхода нажмите ":x" 
+Проверка айпи адреса на ip a 
+затем перезапускаем систему 
+systemctl restart network 
+снова смотрим айпи адрес ip a он должен измениться на 
+inet 172.16.100.2/28
+
+HQ-CLI 
+получает через DHCP 
+
+HQ-AD получает в будущем 
+
+******************
+1 модуль 2 задание
+******************
+Динамическая маршрутизация настройка тоннеля 
+
+HQ-R 
+
+configure
+Создание локальной группы для NAT
+object-group network LOCAL_NET
+ip address-range 192.168.100.1-192.168.100.62
+exit
+object-group network PUBLIC_POOL
+ip address 1.1.1.2
+exit
+nat source
+Создание Пула адресов 
+pool TRANSLATE_ADDRESS 
+ip address 1.1.1.2
+exit
+ruleset SNAT
+to interface gigabitethernet 1/0/1
+rule 1
+match source-address LOCAL_NET
+action source-nat pool TRANSLATE_ADDRESS
+enable
+exit
+exit
+exit
+ip route 0.0.0.0/0 1.1.1.1
+exit
+comm
+confirm
+
+Проверка настройки NAT
+ping 8.8.8.8
+!!!!! -все верно 
+проверка внутреней 
+ping 8.8.8.8 source ip 192.168.100.1 
+!!!!!! - все верно 
+еще проверка 
+show ip nat translations
+
+BR-R
+
+configure
+object-group network LOCAL_NET
+ip address-range 172.16.100.1-172.16.100.14
+exit
+для публ группа сети 
+object-group network PUBLIC_POOL
+ip address 2.2.2.2
+exit
+nat source
+pool TRANSLATE_ADDRESS
+ip address 2.2.2.2
+exit
+Создание правила 
+ruleset SNAT
+to interface gigabitethernet 1/0/1
+rule 1
+match source-address LOCAL_NET
+action source-nat pool TRANSLATE_ADDRESS 
+enable
+exit
+exit
+exit
+Маршрут по умолчанию 
+ip route 0.0.0.0/0 2.2.2.1
+exit
+comm
+confirm
+ping 8.8.8.8
+!!!!!!! = все верно 
+ping 8.8.8.8 source ip 172.16.100.1
+!!!!!! = все верно 
+
+Настройка тунеля 
+
+HQ-R
+
+Адрес в тунеле будет 
+
+configure
+tunnel gre 10
+ip firewall disable
+ВНешний айпи адрес HQ_R
+local address 1.1.1.2
+remote address 2.2.2.2
+адрес тунеля 
+ip address 10.10.10.1/30
+mtu 1426
+ttl 18
+enable
+exit
+exit
+comm
+confirm
+
+
+BR-R
+
+configure
+tunnel gre 10
+ip firewall disable
+local address 2.2.2.2
+remote 1.1.1.2
+remote address 1.1.1.2
+ip address 10.10.10.2/30
+ttl 18
+mtu 1426
+enable
+ex
+ex
+comm
+confirm
+Проверка
+ping 10.10.10.1
+!!!! = все верно 
+
+Настройка ospf 
+
+HQ- R 
+
+configure
+router ospf 10
+router-id 1.1.1.1
+area 1.1.1.1
+network 192.168.100.0/26
+enable
+exit
+enable
+exit
+Настройка на тунеле 
+tunnel gre 10
+ip ospf instance 10 
+ip ospf area 1.1.1.1
+ip ospf 
+exit
+exit
+comm
+confirm
+
+BR-R 
+
+configure
+router ospf 10
+router-id 2.2.2.2
+area 1.1.1.1
+network 172.16.100.0/28
+enable
+exit
+enable
+exit
+tunnel gre 10
+ip ospf instance 10
+ip ospf area 1.1.1.1
+ip ospf 
+exit
+exit
+confirm
+
+BR-R
+Проверка
+show ip ospf neighbors
+если таблица то все работает 
+
+и так же можно на HQ-R 
+Проверка
+show ip ospf neighbors
+если таблица то все работает 
+
+
+******************
+1 модуль 3 задание
+******************
+открываем HQ-R,заходим в глобальные настройки: "configure".
+включаем dhcp сервер с помощью команды: "ip dhcp-server".
+дальше прописать настройки следующей команды и указать pool с названием: называя "LAN_HQ" : "ip dhcp-server pool LAN_HQ"
+сначала прописываем сеть, которая будет выдаваться: "network 192.168.100.0/26"
+потом пул адрессов, которые будут выдаваться: "range 192.168.100.1-192.168.100.62"
+Исключаем адреса из раздачи адресс роутера 192.168.100.1: "excluded-address-range 192.168.100.1"
+и адресс HQ-AD: "excluded-address-range 192.168.100.10". Его нету, но будет, поэтому исключаем.
+У сервера должен быть зарезервирован адресс, DHCP постоянно выдает HQ-SRV адрес 192.168.100.2/26. Заходим в HQ-SRV и с помощью комманды "ip a" мы узнаем mac адресс, где ens192 в link/ether и записываем его. Возвращаемся в HQ-R и пишем команду: "address 192.168.100.2 (адрес HQ-SRV) mac-address (числа mac адресса)".
+Прописываем шлюз по умолчанию: "default-router 192.168.100.1".
+Прописываем DNS сервер, DNS сервером будет являться HQ-SRV: dns-sever 192.168.100.2!
+дальше дважны "exit" и применяем конфигурацию: "comm" и "confirm".
+
+Заходим на HQ-SRV. Правим файлик конфига, чтобы после получил автоматом IP адрес: "vim /etc/net/ifaces/ens192/options". Нажимаем insert и правим файл: BOOTPROTO=dhcp и SYSTEMD_BOOTPROTO=dhcp. Жмём esc и пишем ":wq"
+Для получения адресса автоматически: dhcpcd. 
+Если написать "ip a", то на ens192 ip 192.168.100.2/26.
+Переходим на HQ-CLI и проверяем какой адресс: "ip a", получит ip из пула "192.168.100.1-192.168.100.62" - значит заебись.
+
+******************
+1 модуль 4 задание
+******************
+Сначала создадим админ на cli
+Заходим на cli-заходим в меню-центр управления-центр управления системой-вводим пароль-локальные учетные записи
+ Далее в *новая учетная запись*, пишем *admin*, нажимаем *создать*,  в *комментарий* пишем *Admin*, нажимаем галочку в *входит в группу администраторов*,
+ вводим пароль *P@ssw0rd* и повторяем его, нажимаем *применить*
+Далее заходим в HQ-SRV:
+создаем пользователя *useradd admin –c “Admin”*, нажимаем *enter*. Далее создаем пароль данного пользователя *passwd admin* вводим пароль * P@ssw0rd*
+Дальше нужно определить данного пользователя в группу администраторов, вводим команду *usermod  –aG whell admin*, нажимаем *enter*.
+Проверить создания пользователя командой *cat /etc/passwd*, в самом внизу будет отображаться пользователь *admin*
+Далее создаем на HQ-R:
+ заходим в HQ-R, вводим *configure*, вводим *username admin*, далее пишем *password P@ssw0rd*, выходим *exit*, повторяем выход *exit* чтобы выйти из *configure*,
+ меняем изменения *comm*, далее *confirm*. Можно проверить в конфигурации следующей командой *sh run : inc username* либо командой *show users accounts* он будет показан вверху.
+Теперь создаем branch-admin:
+Заходим на BR-SRV:
+создаем пользователя *useradd branch-admin –c “Branch admin”*, нажимаем *enter*. Далее создаем пароль данного пользователя *passwd branch-admin* вводим пароль * P@ssw0rd*
+Дальше нужно определить данного пользователя в группу администраторов, вводим команду *usermod  –aG whell branch-admin*, нажимаем *enter*.
+Далее создаем на BR-R:
+ заходим в BR-R, вводим *configure*, вводим *username branch-admin*, далее пишем *password P@ssw0rd*, добавляем в группу админов командой *privilege 15*,
+ выходим *exit*, повторяем выход *exit* чтобы выйти из *configure*, меняем изменения *commit*, далее *confirm*.
+
+Далее создаем network-admin:
+Заходим в BR-R:
+ вводим *configure*,  пишем *username network-admin*, далее пишем *password P@ssw0rd*, добавляем в группу админов командой *privilege 15*, 
+ выходим *exit*, повторяем выход *exit* чтобы выйти из *configure*, меняем изменения *commit*, далее *confirm*.
+Также проделываем в HQ-R:
+ вводим *configure*,  пишем *username network-admin*, далее пишем *password P@ssw0rd*, добавляем в группу админов командой *privilege 15*, выходим *exit*, 
+ повторяем выход *exit* чтобы выйти из *configure*, меняем изменения *commit*, далее *confirm*.
+Теперь делаем в BR-SRV:
+создаем пользователя *useradd network-admin –c “ Network admin”*, нажимаем *enter*. Далее создаем пароль данного пользователя *passwd network-admin* вводим пароль * P@ssw0rd*
+Дальше нужно определить данного пользователя в группу администраторов, вводим команду *usermod  –aG whell network-admin*, нажимаем *enter*.
+Проверить создания пользователя командой *cat /etc/passwd*, в самом внизу будет отображаться пользователей. Так же проверяем на HQ-SRV *cat /etc/passwd*, на HQ-R *sh users account*.
+
+******************
+1 модуль 5 задание
+******************
+1. заходим на CLI через пользователя admin или user
+2. заходим в терминал под супер пользователем: su
+3. apt-get update
+4. apt-get install iperf3
+ps/ устанавливается очень долго
+5. Измеряем скорорсть от CLI до ISP: iperf3 -c 3.3.3.1
+6. Измеряем скорость от IPS до CLI: iperf3 -R -c 3.3.3.1
+Приложить 2 скриншота и описать пропускную способность
+
+******************
+1 модуль 6 задание
+******************
+HQ-R:
+1. Логинимся под пользователем admin, вводим пароль
+2. Входим в режим конигурации: configure
+3. Команда для создания бэкапа: archive
+4. Указываем место хранения бэкапа: type local
+5. Указываем количество бэкапов: count-backup 30
+6. Задаём время сохранения бэкапа (раз в день): time-period 1440
+7. Сохранение конфигурации: by-commit
+8. Выходим из режима создания бэкапа: exit
+9. Выходи из режима конфигурации: exit
+10. Применение конфигурации: comm
+11. Запись на устройство: confirm
+12. Просмотр созданых бэкапов: dir flash:backup/ 
+13. Сделать скриншот выданной таблички и вставить в word-файл
+
+BR-R:
+Те же самые шаги повторно.
+
+******************
+1 модуль 7 задание
+******************
+Открываем конфиг:
+nano /etc/openssh/sshd_config
+
+Ищем:
+Port 22 
+И меняем на:
+Port 2222
+******************
+1 модуль 8 задание
+******************
+Открываем конфиг:
+nano /etc/openssh/sshd_config
+
+Прописываем в конец:
+AllowUsers *сервера*
+Например: 
+AllowUsers student@192.168.0.1
+* student - имя пользователя сервера
+* 192.168.0.1 - IP сервера
+******************
+2 модуль 1 задание
+******************
+
+ДЛЯ САМЫХ МАЛЕНЬКИХ - АЙПИ ВЫСТАВЛЯЛ НА РАНДОМ
+
+Скачиваем bind и bind-utils
+apt-get update 					// Если выскакивают ошибки - отключить статику
+apt-get install bind bind-utils
+
+Заходим в /etc/bind/options.conf и меняем/раскомметируем строки
+
+listen-on { any; };
+listen-on-v6 { any; };
+
+forward first;
+forwarders { 8.8.8.8; }; 			
+
+allow-query { any; };
+
+Далее заходим в /etc/resolv.conf			// настройки этого файла могут сбрасываться я хз из-за чего
+Прописываем:
+
+search hq.work
+search branch.work
+nameserver 127.0.0.1 	
+
+Заходим делать зоны
+/etc/bind/local.conf
+
+zone "hq.work" {
+	type master;
+	file "hq.db";
+};
+zone "branch.work" {
+	type master;
+	file "br.db";
+};
+zone "10.16.172.in-addr.arpa" {					// первые три октета айпишника hq-srv в обратном порядке
+	type master;
+	file "0.db";						
+};
+zone "10.16.192.in-addr.arpa" {					// первые три октета айпишника br-srv в обратном порядке
+	type master;
+	file "1.db";
+};
+ 
+Копируем файлы под зоны
+cp /etc/bind/zone/localdomain /etc/bind/zone/hq.db
+cp /etc/bind/zone/localdomain /etc/bind/zone/br.db
+cp /etc/bind/zone/127.in-addr.arpa /etc/bind/zone/0.db			// обратный hq
+cp /etc/bind/zone/127.in-addr.arpa /etc/bind/zone/1.db			// обратный br
+
+chown named. /etc/bind/zone/hq.db	// для всех зон								//
+chmod 600 /etc/bind/zone/hq.db											// ТАК ДЛЯ КАЖДОГО СКОПИРОВАНОГО ФАЙЛА !!!
+chown root:named /etc/bind/zone/0.db  // (СОМНИТЕЛЬНО,  сначало попробуйте без этого)только для обратных зон	//
+
+Приводим /etc/bind/zone/hq.db к такому ввиду: 					// прямая зона hq-r
+$TTL    1D
+@       IN      SOA     hq.work. root.hq.work. (
+                                2024021400      ; serial
+                                12H             ; refresh
+                                1H              ; retry
+                                1W              ; expire
+                                1H              ; ncache
+                        )
+        IN      NS      hq.work.
+        IN      A       127.0.0.0
+hq-r    IN      A       172.16.10.10					// айпи hq-r
+hq-srv  IN      A       172.16.10.11					// айпи hq-srv
+
+Приводим /etc/bind/zone/br.db к такому ввиду:					// прямая зона br-r
+
+$TTL    1D
+@       IN      SOA     branch.work. root.branch.work. (
+                                2024021400      ; serial
+                                12H             ; refresh
+                                1H              ; retry
+                                1W              ; expire
+                                1H              ; ncache
+                        )
+        IN      NS      branch.work.
+        IN      A       127.0.0.0
+br-r    IN      A       192.168.10.10					// айпи br-r
+br-srv  IN      A       192.168.10.11					// айпи br-srv
+
+Приводим /etc/bind/zone/0.db к такому ввиду:
+
+$TTL    1D
+@       IN      SOA     hq.work. root.hq.work. (
+                                2024021400      ; serial
+                                12H             ; refresh
+                                1H              ; retry
+                                1W              ; expire
+                                1H              ; ncache
+                        )
+        IN      NS      hq.work.
+10      IN      PTR     hq-r.hq.work.				// последний октет hq-r
+11      IN      PTR     hq-srv.hq.work.				// последний октет hq-srv
+Приводим /etc/bind/zone/1.db к такому ввиду:
+
+$TTL    1D
+@       IN      SOA     branch.work. root.branch.work. (
+                                2024021400      ; serial
+                                12H             ; refresh
+                                1H              ; retry
+                                1W              ; expire
+                                1H              ; ncache
+                        )
+        IN      NS      branch.work.
+10      IN      PTR     br-r.branch.work.			// последний октет br-r
+
+Пишем:
+systemctl restart bind
+Сохраняем и выходим
+Проверяем синтаксис:
+named-checkconf -z
+
+zone localhost/IN: loaded serial 2024021400
+zone localdomain/IN: loaded serial 2024021400
+zone 127.in-addr.arpa/IN: loaded serial 2024021400
+zone 0.in-addr.arpa/IN: loaded serial 2024021400
+zone 255.in-addr.arpa/IN: loaded serial 2024021400
+zone hq.work/IN: loaded serial 2024021400
+zone branch.work/IN: loaded serial 2024021400
+zone 31.168.192.in-addr.arpa/IN: loaded serial 2024021400
+zone 10.16.172.in-addr.arpa/IN: loaded serial 2024021400
+
+- Вот примерный вывод после проверки синтаксиса
+
+Снова пишем:
+systemctl restart bind
+Проверяем работоспособность:
+nslookup hq-r.hq.work
+
+Выводит:
+Server:         127.0.0.1
+Address:        127.0.0.1#53
+
+Name:   hq-r.hq.work
+Address: 172.16.10.10		
+
+
+
+
+
+******************
+2 модуль 5 задание
+******************
+
+Установим moodle и зависимости:
+apt-get install -y moodle
+apt-get install -y moodle-apache2
+apt-get install -y moodle-local-mysql
+systemctl enable --now mariadb
+systemctl enable --now httpd2
+
+Входим в СУБД и создаем БД:
+mysql -u root
+CREATE DATABASE moodle DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;
+GRANT ALL ON moodle.* TO moodleuser@localhost IDENTIFIED BY 'moodlepasswd';
+FLUSH PRIVILEGES;
+EXIT
+
+Перезагружаем сервисы:
+systemctl restart httpd2
+systemctl restart mariadb
+
+Заходим по адресу http://ВашIPсервера/moodle
+Выбираем русский язык, далее, драйвер БД выбираем MariaDB
+
+Настройки базы данных:
+Сервер баз данных localhost
+Название БД moodle
+Пользователь БД moodleuser
+Пароль moodlepasswd
+Префикс имен таблиц mdl_
+Порт БД 3106
+
+В след окно нажимаем продолжить, в след окне будет ошибка нужно будет редактировать кфг:
+* 8.2 - версия php может отличаться (каталог)
+nano /etc/php/8.2/apache2-mod_php/php.ini
+
+Ищем параметр: max_input_vars и изменяем его на 6000 и убираем ";":
+max_input_vars = 6000
+Сохраняем и перезагружаем сервер, обновляем сайт и нажимаем продолжить и ждем установку
+После установка появится кнопка "продолжить", появится окно с созданием админа:
+Логин admin
+Пароль P@ssw0rd
+e-mail любой
+Часовой пояс Азия/Екатеринбург
+
+Дальше задаём имя ресурса и т. д. и попадаем на главную страницу
+Создание пользователя manager(Администрирование -> Пользователи -> Добавить пользователя)
+Дальше по таблице создаём других
+Создание групп (Администрирование -> Пользователи -> Глобальные группы -> Добавить глобальную группу)
+Остальное всё легко
+
+******************
+2 модуль 6 задание 
+******************
+
+Установка Docker и Docker-compose:
+apt-get install -y docker-engine
+apt-get install -y docker-compose
+systemctl enable --now docker
+
+Привязка пользователя к Docker которого мы указывали при установки altlinux либо создаем:
+usermod *user* -aG docker
+Переходим к домашней директории пользователя и создаём файл wiki.yml:
+cd /home/*user*
+touch wiki.yml
+
+Вставляем следующий код и сохраняем и выходим:
+
+version: '3'
+services:
+  mediawiki:
+    image: mediawiki
+    restart: always
+    ports:
+      - 8080:80
+    links:
+      - database
+    container_name: wiki
+    volumes:
+      - images:/var/www/html/images
+# Сначала устанавливаем вручную до конца, потом убираем комментарий
+#      - ./LocalSettings.php:/var/www/html/LocalSettings.php
+  database:
+    image: mariadb
+    container_name: mariadb
+    restart: always
+    environment:
+      MYSQL_DATABASE: mediawiki
+      MYSQL_USER: wiki
+      MYSQL_PASSWORD: DEP@ssw0rd
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      TZ: Asia/Yekaterinburg
+    volumes:
+      - db:/var/lib/mysql
+volumes:
+  images:
+  db:
+
+Запускаем контейнеры:
+docker-compose -f wiki.yml up -d
+Если всё правильно переходим по *serverip*:8080 и должно появиться - 'Please set up the wiki first' - нажимаем
+Настройка базы данных:
+Для того, чтобы узнать хост базы данных:
+docker exec -it mariadb bash
+hostname -i - вывод: 172.18.0.2 или другой ip
+Заполняем таблицу в вейбе основываясь на wiki.yml файле и полученном хосте
+После чего скачается файл LocalSettings.php - копируем код внутри этого файла
+Создаем файл с таким же названием в: nano /home/user/LocalSettings.php, сохраняем и выходим
+Снимаем комментарий ./LocalSettings.php:/var/www/html/LocalSettings.php в wiki.yml
+Перезапускаем контейнеры:
+docker-compose -f wiki.yml up -d
+
+Установка закончена.
